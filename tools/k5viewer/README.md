@@ -92,6 +92,8 @@ If you encounter issues or have suggestions, feel free to open an issue or submi
 
 Use `combinedqt.py` if you want both the live display and remote button control from your PC keyboard using Qt6.
 
+The keypad is shown under the display, and a dedicated **TX (hold)** button sends **PTT hold** (not SIDE key) while pressed.
+
 ```bash
 ./combinedqt.py --port /dev/ttyUSB0
 ```
