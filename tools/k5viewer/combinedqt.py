@@ -9,7 +9,15 @@ import serial
 from serial.tools import list_ports
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QColor, QPainter, QPixmap, QKeyEvent
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import (
+    QApplication,
+    QWidget,
+    QHBoxLayout,
+    QVBoxLayout,
+    QGridLayout,
+    QPushButton,
+    QCheckBox,
+)
 
 VERSION = "1.1"
 DEFAULT_PORT = "/dev/ttyUSB0"
@@ -129,6 +137,21 @@ def read_frame(ser: serial.Serial, framebuffer: bytearray) -> bytearray | None:
             return apply_diff(framebuffer, ser.read(size))
 
 
+class DisplayCanvas(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.canvas = QPixmap(1, 1)
+
+    def set_canvas(self, canvas: QPixmap):
+        self.canvas = canvas
+        self.setFixedSize(canvas.size())
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, self.canvas)
+
+
 class CombinedQtViewer(QWidget):
     def __init__(self, ser: serial.Serial):
         super().__init__()
@@ -144,9 +167,14 @@ class CombinedQtViewer(QWidget):
 
         self.canvas = QPixmap(self.display_width, self.display_height)
         self.canvas.fill(self.bg_color)
+        self.display = DisplayCanvas(self)
+        self.display.set_canvas(self.canvas)
+        self.long_press_checkbox = QCheckBox("Long press (SHIFT)")
+        self.long_press_checkbox.setToolTip("Send TYPE_KEY_LONG packets")
+
+        self.build_ui()
 
         self.setWindowTitle(f"{self.base_title} – No data")
-        self.setFixedSize(self.display_width, self.display_height)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.timer = QTimer(self)
@@ -162,7 +190,45 @@ class CombinedQtViewer(QWidget):
         return HEIGHT * self.pixel_size
 
     def sizeHint(self) -> QSize:
-        return QSize(self.display_width, self.display_height)
+        return QSize(self.display_width + 260, self.display_height)
+
+    def build_ui(self):
+        layout = QHBoxLayout()
+        layout.addWidget(self.display)
+
+        side_panel = QVBoxLayout()
+        side_panel.addWidget(self.long_press_checkbox)
+
+        grid = QGridLayout()
+        button_rows = [
+            ["MENU", "UP", "EXIT"],
+            ["1", "2", "3"],
+            ["4", "5", "6"],
+            ["7", "8", "9"],
+            ["STAR", "0", "F"],
+            ["SIDE1", "DOWN", "SIDE2"],
+        ]
+
+        for r, row in enumerate(button_rows):
+            for c, key_name in enumerate(row):
+                button = QPushButton(key_name)
+                button.setMinimumSize(64, 36)
+                button.clicked.connect(lambda checked=False, name=key_name: self.send_named_key(name))
+                grid.addWidget(button, r, c)
+
+        side_panel.addLayout(grid)
+        side_panel.addStretch(1)
+
+        layout.addLayout(side_panel)
+        self.setLayout(layout)
+
+    def send_named_key(self, key_name: str, is_long: bool | None = None):
+        if key_name not in KEYCODES:
+            return
+        if is_long is None:
+            is_long = self.long_press_checkbox.isChecked()
+        send_radio_key(self.ser, KEYCODES[key_name], is_long)
+        self.setFocus()
 
     def poll_serial(self):
         frame = read_frame(self.ser, self.framebuffer)
@@ -205,11 +271,7 @@ class CombinedQtViewer(QWidget):
                 bit_index += 1
 
         painter.end()
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.drawPixmap(0, 0, self.canvas)
+        self.display.set_canvas(self.canvas)
 
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
@@ -240,14 +302,12 @@ class CombinedQtViewer(QWidget):
         if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus):
             if self.pixel_size < 12:
                 self.pixel_size += 1
-                self.setFixedSize(self.display_width, self.display_height)
                 self.draw_frame()
             return
 
         if key in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
             if self.pixel_size > 3:
                 self.pixel_size -= 1
-                self.setFixedSize(self.display_width, self.display_height)
                 self.draw_frame()
             return
 
