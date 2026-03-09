@@ -32,7 +32,7 @@ It's also a handy tool for development and debugging, especially for display-rel
 If necessary, use this command to install dependencies: 
 
 ```bash
-pip install pyserial pygame
+pip install pyserial pygame PyQt6
 ```
 
 ## ▶️ How to Run
@@ -90,13 +90,13 @@ If you encounter issues or have suggestions, feel free to open an issue or submi
 
 ## 🎛️ Combined display + remote control
 
-Use `combined.py` if you want both the live display and remote button control from your PC keyboard.
+Use `combinedqt.py` if you want both the live display and remote button control from your PC keyboard using Qt6.
 
 ```bash
-./combined.py --port /dev/ttyUSB0
+./combinedqt.py --port /dev/ttyUSB0
 ```
 
-### Remote key mappings (`combined.py`)
+### Remote key mappings (`combinedqt.py`)
 
 - `0..9` and keypad `0..9` → radio number keys
 - `A` → `MENU`
