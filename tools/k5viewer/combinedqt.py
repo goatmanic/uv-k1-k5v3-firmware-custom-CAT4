@@ -165,8 +165,6 @@ class CombinedQtViewer(QWidget):
         self.frame_count = 0
         self.frame_lost = 0
         self.last_time = time.monotonic()
-        self.last_key_sent: tuple[str, bool] | None = None
-        self.last_key_sent_at = 0.0
 
         self.canvas = QPixmap(self.display_width, self.display_height)
         self.canvas.fill(self.bg_color)
@@ -252,12 +250,6 @@ class CombinedQtViewer(QWidget):
             return
         if is_long is None:
             is_long = self.long_press_checkbox.isChecked()
-        now = time.monotonic()
-        key_event = (key_name, is_long)
-        if key_event == self.last_key_sent and (now - self.last_key_sent_at) < 0.2:
-            return
-        self.last_key_sent = key_event
-        self.last_key_sent_at = now
         send_radio_key(self.ser, KEYCODES[key_name], is_long)
         self.setFocus()
 
@@ -305,6 +297,9 @@ class CombinedQtViewer(QWidget):
         self.display.set_canvas(self.canvas)
 
     def keyPressEvent(self, event: QKeyEvent):
+        if event.isAutoRepeat():
+            return
+
         key = event.key()
 
         if key == Qt.Key.Key_Q:
