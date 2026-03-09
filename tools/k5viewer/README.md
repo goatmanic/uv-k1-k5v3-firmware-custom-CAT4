@@ -32,7 +32,7 @@ It's also a handy tool for development and debugging, especially for display-rel
 If necessary, use this command to install dependencies: 
 
 ```bash
-pip install pyserial pygame
+pip install pyserial PyQt6
 ```
 
 ## ▶️ How to Run
@@ -86,3 +86,28 @@ Screenshots are saved as `screenshot_YYYYMMDD_HHMMSS.png` in the same directory.
 ## 📬 Contact
 
 If you encounter issues or have suggestions, feel free to open an issue or submit a pull request. Enjoy building with your Quansheng K5! 📡
+
+
+## 🎛️ Combined display + remote control
+
+Use `combined.py` if you want both the live display and remote button control from your PC keyboard.
+
+`combined.py` uses **PyQt6** (not pygame).
+
+```bash
+./combined.py --port /dev/ttyUSB0
+```
+
+### Remote key mappings (`combined.py`)
+
+- `0..9` and keypad `0..9` → radio number keys
+- `A` → `MENU`
+- `Z` → `EXIT`
+- `UP` / `DOWN` → radio UP / DOWN keys
+- `X` or keypad `*` → `*`
+- `C` → `#`
+- `F1` → `SIDE1`
+- `F2` → `SIDE2`
+- Hold `Shift` while pressing any mapped key to send a **long press**
+
+Viewer controls remain available (`Q`, `SPACE`, `G/B/O/W`, `I`, `P`, `+/-`).
