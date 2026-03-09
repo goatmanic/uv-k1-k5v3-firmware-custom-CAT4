@@ -50,6 +50,7 @@ KEYCODES = {
     "EXIT": 13,
     "STAR": 14,
     "F": 15,
+    "PTT": 16,
     "SIDE2": 17,
     "SIDE1": 18,
 }
@@ -233,7 +234,7 @@ class CombinedQtViewer(QWidget):
         self.setLayout(layout)
 
     def send_tx_hold_key(self):
-        send_radio_key(self.ser, KEYCODES["SIDE2"], False)
+        send_radio_key(self.ser, KEYCODES["PTT"], False)
 
     def start_tx_hold(self):
         self.send_tx_hold_key()
