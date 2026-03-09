@@ -40,15 +40,48 @@ volatile KEY_Code_t gKeyFromSerial      = KEY_INVALID;
 static   uint8_t    gSerialKeyHoldCount = 0;
 static   uint8_t    gSerialKeyLong      = 0;  // 0 = short press, 1 = long press
 
+typedef struct {
+    KEY_Code_t key;
+    uint8_t    isLong;
+} SerialKeyEvent_t;
+
+#define SERIAL_KEY_QUEUE_SIZE 8
+static SerialKeyEvent_t gSerialKeyQueue[SERIAL_KEY_QUEUE_SIZE];
+static uint8_t          gSerialKeyQueueHead = 0;
+static uint8_t          gSerialKeyQueueTail = 0;
+
+static bool KEYBOARD_EnqueueSerialKey(KEY_Code_t key, uint8_t isLong)
+{
+    uint8_t nextHead = (uint8_t)((gSerialKeyQueueHead + 1) % SERIAL_KEY_QUEUE_SIZE);
+
+    // Queue full: drop the new key to preserve already-buffered user input order.
+    if (nextHead == gSerialKeyQueueTail)
+        return false;
+
+    gSerialKeyQueue[gSerialKeyQueueHead].key    = key;
+    gSerialKeyQueue[gSerialKeyQueueHead].isLong = isLong;
+    gSerialKeyQueueHead = nextHead;
+    return true;
+}
+
+static bool KEYBOARD_DequeueSerialKey(KEY_Code_t *key, uint8_t *isLong)
+{
+    if (gSerialKeyQueueHead == gSerialKeyQueueTail)
+        return false;
+
+    *key    = gSerialKeyQueue[gSerialKeyQueueTail].key;
+    *isLong = gSerialKeyQueue[gSerialKeyQueueTail].isLong;
+    gSerialKeyQueueTail = (uint8_t)((gSerialKeyQueueTail + 1) % SERIAL_KEY_QUEUE_SIZE);
+    return true;
+}
+
 // Inject a short press from serial (UART or VCP).
 // PTT is allowed so host tools (combined.py/combinedqt.py) can drive TX.
 // Release is still guaranteed by KEYBOARD_Poll() once the hold-count expires.
 void KEYBOARD_InjectKey(uint8_t keyCode)
 {
     if (keyCode < KEY_INVALID) {
-        gKeyFromSerial      = (KEY_Code_t)keyCode;
-        gSerialKeyHoldCount = 0;
-        gSerialKeyLong      = 0;
+        KEYBOARD_EnqueueSerialKey((KEY_Code_t)keyCode, 0);
     }
 }
 
@@ -57,9 +90,7 @@ void KEYBOARD_InjectKey(uint8_t keyCode)
 void KEYBOARD_InjectKeyLong(uint8_t keyCode)
 {
     if (keyCode < KEY_INVALID) {
-        gKeyFromSerial      = (KEY_Code_t)keyCode;
-        gSerialKeyHoldCount = 0;
-        gSerialKeyLong      = 1;
+        KEYBOARD_EnqueueSerialKey((KEY_Code_t)keyCode, 1);
     }
 }
 #endif
@@ -122,6 +153,16 @@ KEY_Code_t KEYBOARD_Poll(void)
     //   - Long:  key_repeat_delay_10ms (40) → ProcessKey(key, true, true)
     // Once the hold count is exhausted we clear it — next call returns KEY_INVALID,
     // which triggers the release path in app.c naturally.
+    if (gKeyFromSerial == KEY_INVALID) {
+        KEY_Code_t nextKey;
+        uint8_t    nextIsLong;
+        if (KEYBOARD_DequeueSerialKey(&nextKey, &nextIsLong)) {
+            gKeyFromSerial      = nextKey;
+            gSerialKeyHoldCount = 0;
+            gSerialKeyLong      = nextIsLong;
+        }
+    }
+
     if (gKeyFromSerial != KEY_INVALID) {
         KEY_Code_t injected  = gKeyFromSerial;
         uint8_t    threshold = gSerialKeyLong ? SERIAL_KEY_LONG_POLLS : SERIAL_KEY_SHORT_POLLS;
