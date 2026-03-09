@@ -41,10 +41,11 @@ static   uint8_t    gSerialKeyHoldCount = 0;
 static   uint8_t    gSerialKeyLong      = 0;  // 0 = short press, 1 = long press
 
 // Inject a short press from serial (UART or VCP).
-// KEY_PTT is explicitly blocked — PTT release cannot be guaranteed over serial.
+// PTT is allowed so host tools (combined.py/combinedqt.py) can drive TX.
+// Release is still guaranteed by KEYBOARD_Poll() once the hold-count expires.
 void KEYBOARD_InjectKey(uint8_t keyCode)
 {
-    if (keyCode < KEY_INVALID && keyCode != KEY_PTT) {
+    if (keyCode < KEY_INVALID) {
         gKeyFromSerial      = (KEY_Code_t)keyCode;
         gSerialKeyHoldCount = 0;
         gSerialKeyLong      = 0;
@@ -52,10 +53,10 @@ void KEYBOARD_InjectKey(uint8_t keyCode)
 }
 
 // Inject a long press from serial (UART or VCP).
-// KEY_PTT is explicitly blocked — PTT release cannot be guaranteed over serial.
+// PTT is allowed so host tools can emulate press-and-hold transmit.
 void KEYBOARD_InjectKeyLong(uint8_t keyCode)
 {
-    if (keyCode < KEY_INVALID && keyCode != KEY_PTT) {
+    if (keyCode < KEY_INVALID) {
         gKeyFromSerial      = (KEY_Code_t)keyCode;
         gSerialKeyHoldCount = 0;
         gSerialKeyLong      = 1;
