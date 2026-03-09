@@ -171,6 +171,9 @@ class CombinedQtViewer(QWidget):
         self.display.set_canvas(self.canvas)
         self.long_press_checkbox = QCheckBox("Long press (SHIFT)")
         self.long_press_checkbox.setToolTip("Send TYPE_KEY_LONG packets")
+        self.tx_timer = QTimer(self)
+        self.tx_timer.setInterval(120)
+        self.tx_timer.timeout.connect(self.send_tx_hold_key)
 
         self.build_ui()
 
@@ -190,14 +193,23 @@ class CombinedQtViewer(QWidget):
         return HEIGHT * self.pixel_size
 
     def sizeHint(self) -> QSize:
-        return QSize(self.display_width + 260, self.display_height)
+        return QSize(self.display_width + 20, self.display_height + 280)
 
     def build_ui(self):
-        layout = QHBoxLayout()
-        layout.addWidget(self.display)
+        layout = QVBoxLayout()
+        layout.addWidget(self.display, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        side_panel = QVBoxLayout()
-        side_panel.addWidget(self.long_press_checkbox)
+        controls = QHBoxLayout()
+        controls.addWidget(self.long_press_checkbox)
+        controls.addStretch(1)
+
+        tx_button = QPushButton("TX (hold)")
+        tx_button.setMinimumSize(96, 36)
+        tx_button.setToolTip("Push and hold to keep transmitting")
+        tx_button.pressed.connect(self.start_tx_hold)
+        tx_button.released.connect(self.stop_tx_hold)
+        controls.addWidget(tx_button)
+        layout.addLayout(controls)
 
         grid = QGridLayout()
         button_rows = [
@@ -216,11 +228,19 @@ class CombinedQtViewer(QWidget):
                 button.clicked.connect(lambda checked=False, name=key_name: self.send_named_key(name))
                 grid.addWidget(button, r, c)
 
-        side_panel.addLayout(grid)
-        side_panel.addStretch(1)
-
-        layout.addLayout(side_panel)
+        layout.addLayout(grid)
+        layout.addStretch(1)
         self.setLayout(layout)
+
+    def send_tx_hold_key(self):
+        send_radio_key(self.ser, KEYCODES["SIDE2"], False)
+
+    def start_tx_hold(self):
+        self.send_tx_hold_key()
+        self.tx_timer.start()
+
+    def stop_tx_hold(self):
+        self.tx_timer.stop()
 
     def send_named_key(self, key_name: str, is_long: bool | None = None):
         if key_name not in KEYCODES:
@@ -323,6 +343,7 @@ class CombinedQtViewer(QWidget):
 
     def closeEvent(self, event):
         self.timer.stop()
+        self.tx_timer.stop()
         self.ser.close()
         event.accept()
 
