@@ -234,7 +234,9 @@ class CombinedQtViewer(QWidget):
         self.setLayout(layout)
 
     def send_tx_hold_key(self):
-        send_radio_key(self.ser, KEYCODES["PTT"], False)
+        # Use long-press packets for TX hold so the firmware keeps PTT asserted
+        # between timer ticks instead of briefly releasing it.
+        send_radio_key(self.ser, KEYCODES["PTT"], True)
 
     def start_tx_hold(self):
         self.send_tx_hold_key()
