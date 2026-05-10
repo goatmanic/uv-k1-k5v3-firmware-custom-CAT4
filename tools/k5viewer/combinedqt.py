@@ -186,6 +186,7 @@ class CombinedQtViewer(QWidget):
         self.frame_count = 0
         self.frame_lost = 0
         self.last_time = time.monotonic()
+        self.last_keepalive = 0.0
 
         self.canvas = QPixmap(self.display_width, self.display_height)
         self.canvas.fill(self.bg_color)
@@ -195,12 +196,12 @@ class CombinedQtViewer(QWidget):
         self.rx_buffer = bytearray()
         self.long_press_checkbox.setToolTip("Send TYPE_KEY_LONG packets")
         self.tx_timer = QTimer(self)
-        self.tx_timer.setInterval(120)
+        self.tx_timer.setInterval(60)
         self.tx_timer.timeout.connect(self.send_tx_hold_key)
         self.held_keycode = None
         self.held_key_long = False
         self.key_repeat_timer = QTimer(self)
-        self.key_repeat_timer.setInterval(85)
+        self.key_repeat_timer.setInterval(45)
         self.key_repeat_timer.timeout.connect(self.send_held_key)
 
         self.build_ui()
@@ -303,7 +304,10 @@ class CombinedQtViewer(QWidget):
             if self.frame_lost == 5:
                 self.setWindowTitle(f"{self.base_title} – No data")
 
-        send_keepalive(self.ser)
+        now = time.monotonic()
+        if now - self.last_keepalive >= 0.10:
+            send_keepalive(self.ser)
+            self.last_keepalive = now
 
     def draw_frame(self):
         self.canvas = QPixmap(self.display_width, self.display_height)

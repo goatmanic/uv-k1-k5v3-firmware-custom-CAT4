@@ -166,6 +166,12 @@ KEY_Code_t KEYBOARD_Poll(void)
     if (gKeyFromSerial != KEY_INVALID) {
         KEY_Code_t injected  = gKeyFromSerial;
         uint8_t    threshold = gSerialKeyLong ? SERIAL_KEY_LONG_POLLS : SERIAL_KEY_SHORT_POLLS;
+
+        // Latency optimization for remote TX hold (PTT long packet):
+        // trigger initial press quickly, then rely on repeated host packets
+        // to keep PTT asserted instead of waiting ~400ms for long-press timing.
+        if (gSerialKeyLong && injected == KEY_PTT)
+            threshold = SERIAL_KEY_SHORT_POLLS;
         if (++gSerialKeyHoldCount >= threshold) {
             gKeyFromSerial      = KEY_INVALID;
             gSerialKeyHoldCount = 0;
