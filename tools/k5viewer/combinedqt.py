@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 VERSION = "1.1"
 DEFAULT_PORT = "/dev/ttyUSB0"
 BAUDRATE = 38400
-TIMEOUT = 0.5
+TIMEOUT = 0
 
 WIDTH, HEIGHT = 128, 64
 FRAME_SIZE = 1024
@@ -113,29 +113,50 @@ def apply_diff(fb: bytearray, diff_payload: bytes) -> bytearray:
     return fb
 
 
-def read_frame(ser: serial.Serial, framebuffer: bytearray) -> bytearray | None:
-    while True:
+def read_frame(ser: serial.Serial, framebuffer: bytearray, rx_buffer: bytearray) -> bytearray | None:
+    try:
+        pending = ser.in_waiting
+    except serial.SerialException:
+        print("[!] Your USB serial cable is probably being used by another application such as Chirp or Chrome.")
+        sys.exit(1)
+
+    if pending:
         try:
-            b = ser.read(1)
+            rx_buffer.extend(ser.read(pending))
         except serial.SerialException:
             print("[!] Your USB serial cable is probably being used by another application such as Chirp or Chrome.")
             sys.exit(1)
 
-        if not b:
+    while len(rx_buffer) >= 5:
+        hdr_pos = rx_buffer.find(HEADER)
+        if hdr_pos < 0:
+            rx_buffer.clear()
             return None
-        if b != HEADER[0:1]:
+        if hdr_pos > 0:
+            del rx_buffer[:hdr_pos]
+        if len(rx_buffer) < 5:
+            return None
+
+        frame_type = bytes(rx_buffer[2:3])
+        size = int.from_bytes(rx_buffer[3:5], "big")
+        packet_size = 5 + size
+
+        if size > FRAME_SIZE * 2:
+            del rx_buffer[:2]
             continue
 
-        b2 = ser.read(1)
-        if b2 != HEADER[1:2]:
-            continue
+        if len(rx_buffer) < packet_size:
+            return None
 
-        frame_type = ser.read(1)
-        size = int.from_bytes(ser.read(2), "big")
+        payload = bytes(rx_buffer[5:packet_size])
+        del rx_buffer[:packet_size]
+
         if frame_type == TYPE_SCREENSHOT and size == FRAME_SIZE:
-            return bytearray(ser.read(FRAME_SIZE))
+            return bytearray(payload)
         if frame_type == TYPE_DIFF and size % 9 == 0:
-            return apply_diff(framebuffer, ser.read(size))
+            return apply_diff(framebuffer, payload)
+
+    return None
 
 
 class DisplayCanvas(QWidget):
@@ -171,6 +192,7 @@ class CombinedQtViewer(QWidget):
         self.display = DisplayCanvas(self)
         self.display.set_canvas(self.canvas)
         self.long_press_checkbox = QCheckBox("Long press (SHIFT)")
+        self.rx_buffer = bytearray()
         self.long_press_checkbox.setToolTip("Send TYPE_KEY_LONG packets")
         self.tx_timer = QTimer(self)
         self.tx_timer.setInterval(120)
@@ -226,7 +248,7 @@ class CombinedQtViewer(QWidget):
             for c, key_name in enumerate(row):
                 button = QPushButton(key_name)
                 button.setMinimumSize(64, 36)
-                button.clicked.connect(lambda checked=False, name=key_name: self.send_named_key(name))
+                button.pressed.connect(lambda name=key_name: self.send_named_key(name))
                 grid.addWidget(button, r, c)
 
         layout.addLayout(grid)
@@ -254,7 +276,7 @@ class CombinedQtViewer(QWidget):
         self.setFocus()
 
     def poll_serial(self):
-        frame = read_frame(self.ser, self.framebuffer)
+        frame = read_frame(self.ser, self.framebuffer, self.rx_buffer)
         if frame:
             self.framebuffer = frame
             self.draw_frame()
