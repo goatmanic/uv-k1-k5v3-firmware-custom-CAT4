@@ -187,6 +187,10 @@ class CombinedQtViewer(QWidget):
         self.frame_lost = 0
         self.last_time = time.monotonic()
         self.last_keepalive = 0.0
+        self._pixel_rects = [
+            ((i % WIDTH) * (self.pixel_size - 1), (i // WIDTH) * self.pixel_size)
+            for i in range(WIDTH * HEIGHT)
+        ]
 
         self.canvas = QPixmap(self.display_width, self.display_height)
         self.canvas.fill(self.bg_color)
@@ -211,7 +215,7 @@ class CombinedQtViewer(QWidget):
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll_serial)
-        self.timer.start(5)
+        self.timer.start(15)
 
     @property
     def display_width(self) -> int:
@@ -287,9 +291,15 @@ class CombinedQtViewer(QWidget):
         self.setFocus()
 
     def poll_serial(self):
-        frame = read_frame(self.ser, self.framebuffer, self.rx_buffer)
-        if frame:
-            self.framebuffer = frame
+        latest_frame = None
+        while True:
+            frame = read_frame(self.ser, self.framebuffer, self.rx_buffer)
+            if frame is None:
+                break
+            latest_frame = frame
+
+        if latest_frame is not None:
+            self.framebuffer = latest_frame
             self.draw_frame()
             self.frame_count += 1
             now = time.monotonic()
@@ -305,9 +315,16 @@ class CombinedQtViewer(QWidget):
                 self.setWindowTitle(f"{self.base_title} – No data")
 
         now = time.monotonic()
-        if now - self.last_keepalive >= 0.10:
+        if now - self.last_keepalive >= 0.25:
             send_keepalive(self.ser)
             self.last_keepalive = now
+
+
+    def _rebuild_pixel_rects(self):
+        self._pixel_rects = [
+            ((i % WIDTH) * (self.pixel_size - 1), (i // WIDTH) * self.pixel_size)
+            for i in range(WIDTH * HEIGHT)
+        ]
 
     def draw_frame(self):
         self.canvas = QPixmap(self.display_width, self.display_height)
@@ -317,17 +334,15 @@ class CombinedQtViewer(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(self.fg_color)
 
-        bit_index = 0
-        for y in range(HEIGHT):
-            for x in range(WIDTH):
-                byte_idx = bit_index // 8
-                bit_pos = bit_index % 8
-                bit = (self.framebuffer[byte_idx] >> bit_pos) & 0x01 if byte_idx < len(self.framebuffer) else 0
-                if bit:
-                    px = x * (self.pixel_size - 1)
-                    py = y * self.pixel_size
-                    painter.drawRect(px, py, self.pixel_size - 1 - self.pixel_lcd, self.pixel_size - self.pixel_lcd)
-                bit_index += 1
+        pixel_w = self.pixel_size - 1 - self.pixel_lcd
+        pixel_h = self.pixel_size - self.pixel_lcd
+        for bit_index, (px, py) in enumerate(self._pixel_rects):
+            byte_idx = bit_index // 8
+            bit_pos = bit_index % 8
+            if byte_idx >= len(self.framebuffer):
+                break
+            if (self.framebuffer[byte_idx] >> bit_pos) & 0x01:
+                painter.drawRect(px, py, pixel_w, pixel_h)
 
         painter.end()
         self.display.set_canvas(self.canvas)
@@ -361,12 +376,14 @@ class CombinedQtViewer(QWidget):
         if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus):
             if self.pixel_size < 12:
                 self.pixel_size += 1
+                self._rebuild_pixel_rects()
                 self.draw_frame()
             return
 
         if key in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
             if self.pixel_size > 3:
                 self.pixel_size -= 1
+                self._rebuild_pixel_rects()
                 self.draw_frame()
             return
 
