@@ -45,7 +45,7 @@ typedef struct {
     uint8_t    isLong;
 } SerialKeyEvent_t;
 
-#define SERIAL_KEY_QUEUE_SIZE 8
+#define SERIAL_KEY_QUEUE_SIZE 32
 static SerialKeyEvent_t gSerialKeyQueue[SERIAL_KEY_QUEUE_SIZE];
 static uint8_t          gSerialKeyQueueHead = 0;
 static uint8_t          gSerialKeyQueueTail = 0;
@@ -54,9 +54,9 @@ static bool KEYBOARD_EnqueueSerialKey(KEY_Code_t key, uint8_t isLong)
 {
     uint8_t nextHead = (uint8_t)((gSerialKeyQueueHead + 1) % SERIAL_KEY_QUEUE_SIZE);
 
-    // Queue full: drop the new key to preserve already-buffered user input order.
+    // Queue full: drop the oldest key so the newest user input is kept responsive.
     if (nextHead == gSerialKeyQueueTail)
-        return false;
+        gSerialKeyQueueTail = (uint8_t)((gSerialKeyQueueTail + 1) % SERIAL_KEY_QUEUE_SIZE);
 
     gSerialKeyQueue[gSerialKeyQueueHead].key    = key;
     gSerialKeyQueue[gSerialKeyQueueHead].isLong = isLong;
