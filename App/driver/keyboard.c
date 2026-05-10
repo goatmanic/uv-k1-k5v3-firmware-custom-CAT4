@@ -30,11 +30,11 @@ bool       gWasFKeyPressed  = false;
 #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
 // Short press: hold key for SERIAL_KEY_SHORT_POLLS calls.
 // Must exceed key_debounce_10ms (2) to trigger ProcessKey(key, true, false).
-#define SERIAL_KEY_SHORT_POLLS  5
+#define SERIAL_KEY_SHORT_POLLS  2
 
 // Long press: hold key for SERIAL_KEY_LONG_POLLS calls.
 // Must exceed key_repeat_delay_10ms (40) to trigger ProcessKey(key, true, true).
-#define SERIAL_KEY_LONG_POLLS   45
+#define SERIAL_KEY_LONG_POLLS   40
 
 volatile KEY_Code_t gKeyFromSerial      = KEY_INVALID;
 static   uint8_t    gSerialKeyHoldCount = 0;
@@ -45,7 +45,7 @@ typedef struct {
     uint8_t    isLong;
 } SerialKeyEvent_t;
 
-#define SERIAL_KEY_QUEUE_SIZE 8
+#define SERIAL_KEY_QUEUE_SIZE 32
 static SerialKeyEvent_t gSerialKeyQueue[SERIAL_KEY_QUEUE_SIZE];
 static uint8_t          gSerialKeyQueueHead = 0;
 static uint8_t          gSerialKeyQueueTail = 0;
@@ -54,9 +54,9 @@ static bool KEYBOARD_EnqueueSerialKey(KEY_Code_t key, uint8_t isLong)
 {
     uint8_t nextHead = (uint8_t)((gSerialKeyQueueHead + 1) % SERIAL_KEY_QUEUE_SIZE);
 
-    // Queue full: drop the new key to preserve already-buffered user input order.
+    // Queue full: discard the oldest buffered key so new host input stays responsive.
     if (nextHead == gSerialKeyQueueTail)
-        return false;
+        gSerialKeyQueueTail = (uint8_t)((gSerialKeyQueueTail + 1) % SERIAL_KEY_QUEUE_SIZE);
 
     gSerialKeyQueue[gSerialKeyQueueHead].key    = key;
     gSerialKeyQueue[gSerialKeyQueueHead].isLong = isLong;
