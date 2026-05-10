@@ -30,11 +30,11 @@ bool       gWasFKeyPressed  = false;
 #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
 // Short press: hold key for SERIAL_KEY_SHORT_POLLS calls.
 // Must exceed key_debounce_10ms (2) to trigger ProcessKey(key, true, false).
-#define SERIAL_KEY_SHORT_POLLS  5
+#define SERIAL_KEY_SHORT_POLLS  3
 
 // Long press: hold key for SERIAL_KEY_LONG_POLLS calls.
 // Must exceed key_repeat_delay_10ms (40) to trigger ProcessKey(key, true, true).
-#define SERIAL_KEY_LONG_POLLS   45
+#define SERIAL_KEY_LONG_POLLS   41
 
 volatile KEY_Code_t gKeyFromSerial      = KEY_INVALID;
 static   uint8_t    gSerialKeyHoldCount = 0;
