@@ -197,6 +197,11 @@ class CombinedQtViewer(QWidget):
         self.tx_timer = QTimer(self)
         self.tx_timer.setInterval(120)
         self.tx_timer.timeout.connect(self.send_tx_hold_key)
+        self.held_keycode = None
+        self.held_key_long = False
+        self.key_repeat_timer = QTimer(self)
+        self.key_repeat_timer.setInterval(85)
+        self.key_repeat_timer.timeout.connect(self.send_held_key)
 
         self.build_ui()
 
@@ -260,6 +265,11 @@ class CombinedQtViewer(QWidget):
         # between timer ticks instead of briefly releasing it.
         send_radio_key(self.ser, KEYCODES["PTT"], True)
 
+    def send_held_key(self):
+        if self.held_keycode is None:
+            return
+        send_radio_key(self.ser, self.held_keycode, self.held_key_long)
+
     def start_tx_hold(self):
         self.send_tx_hold_key()
         self.tx_timer.start()
@@ -319,9 +329,6 @@ class CombinedQtViewer(QWidget):
         self.display.set_canvas(self.canvas)
 
     def keyPressEvent(self, event: QKeyEvent):
-        if event.isAutoRepeat():
-            return
-
         key = event.key()
 
         if key == Qt.Key.Key_Q:
@@ -367,11 +374,27 @@ class CombinedQtViewer(QWidget):
 
         if key in KEY_BINDINGS:
             is_long = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            send_radio_key(self.ser, KEY_BINDINGS[key], is_long)
+            keycode = KEY_BINDINGS[key]
+            send_radio_key(self.ser, keycode, is_long)
+            if not event.isAutoRepeat():
+                self.held_keycode = keycode
+                self.held_key_long = is_long
+                self.key_repeat_timer.start()
+
+    def keyReleaseEvent(self, event: QKeyEvent):
+        if event.isAutoRepeat():
+            return
+
+        key = event.key()
+        if key in KEY_BINDINGS and self.held_keycode == KEY_BINDINGS[key]:
+            self.key_repeat_timer.stop()
+            self.held_keycode = None
+            self.held_key_long = False
 
     def closeEvent(self, event):
         self.timer.stop()
         self.tx_timer.stop()
+        self.key_repeat_timer.stop()
         self.ser.close()
         event.accept()
 
