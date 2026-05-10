@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 
+import argparse
+import datetime
 import sys
 import time
-import datetime
-import argparse
 
 import serial
 from serial.tools import list_ports
-from PyQt6.QtCore import Qt, QTimer, QSize
-from PyQt6.QtGui import QColor, QPainter, QPixmap, QKeyEvent
+from PyQt6.QtCore import QSize, Qt, QTimer
+from PyQt6.QtGui import QColor, QImage, QKeyEvent, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
-    QWidget,
-    QHBoxLayout,
-    QVBoxLayout,
-    QGridLayout,
-    QPushButton,
     QCheckBox,
+    QGridLayout,
+    QHBoxLayout,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-VERSION = "1.1"
+VERSION = "1.2"
 DEFAULT_PORT = "/dev/ttyUSB0"
 BAUDRATE = 38400
 TIMEOUT = 0
@@ -78,10 +78,10 @@ KEY_BINDINGS = {
 }
 
 COLOR_SETS = {
-    "g": ("Grey", QColor(0, 0, 0), QColor(202, 202, 202)),
-    "o": ("Orange", QColor(0, 0, 0), QColor(255, 193, 37)),
-    "b": ("Blue", QColor(0, 0, 0), QColor(28, 134, 228)),
-    "w": ("White", QColor(0, 0, 0), QColor(255, 255, 255)),
+    "g": ("Grey", QColor(202, 202, 202), QColor(0, 0, 0)),
+    "o": ("Orange", QColor(255, 193, 37), QColor(0, 0, 0)),
+    "b": ("Blue", QColor(28, 134, 228), QColor(0, 0, 0)),
+    "w": ("White", QColor(255, 255, 255), QColor(0, 0, 0)),
 }
 DEFAULT_COLOR = "g"
 
@@ -101,16 +101,16 @@ def send_radio_key(ser: serial.Serial, keycode: int, is_long: bool):
         print("[!] Failed to send key packet to radio")
 
 
-def apply_diff(fb: bytearray, diff_payload: bytes) -> bytearray:
+def apply_diff(framebuffer: bytearray, diff_payload: bytes) -> bytearray:
     i = 0
     while i + 9 <= len(diff_payload):
         block_index = diff_payload[i]
         i += 1
         if block_index >= 128:
             break
-        fb[block_index * 8: block_index * 8 + 8] = diff_payload[i:i + 8]
+        framebuffer[block_index * 8:block_index * 8 + 8] = diff_payload[i:i + 8]
         i += 8
-    return fb
+    return framebuffer
 
 
 def read_frame(ser: serial.Serial, framebuffer: bytearray, rx_buffer: bytearray) -> bytearray | None:
@@ -128,12 +128,13 @@ def read_frame(ser: serial.Serial, framebuffer: bytearray, rx_buffer: bytearray)
             sys.exit(1)
 
     while len(rx_buffer) >= 5:
-        hdr_pos = rx_buffer.find(HEADER)
-        if hdr_pos < 0:
+        start = rx_buffer.find(HEADER)
+        if start < 0:
             rx_buffer.clear()
             return None
-        if hdr_pos > 0:
-            del rx_buffer[:hdr_pos]
+        if start > 0:
+            del rx_buffer[:start]
+
         if len(rx_buffer) < 5:
             return None
 
@@ -179,36 +180,37 @@ class CombinedQtViewer(QWidget):
         super().__init__()
         self.ser = ser
         self.framebuffer = bytearray([0] * FRAME_SIZE)
+        self.rx_buffer = bytearray()
+
         self.pixel_size = 5
         self.pixel_lcd = 0
-        self.fg_color, self.bg_color = COLOR_SETS[DEFAULT_COLOR][1:]
-        self.base_title = f"Quansheng K5 Combined Viewer/Remote v{VERSION}"
-        self.frame_count = 0
-        self.frame_lost = 0
-        self.last_time = time.monotonic()
-        self.last_draw_time = 0.0
-        self.last_keepalive_time = 0.0
         self.max_draw_fps = 25
 
-        self.canvas = QPixmap(self.display_width, self.display_height)
-        self.canvas.fill(self.bg_color)
+        self.last_title_time = time.monotonic()
+        self.last_draw_time = 0.0
+        self.last_keepalive_time = 0.0
+        self.frame_counter = 0
+        self.frame_lost = 0
+
+        self.fg_color, self.bg_color = COLOR_SETS[DEFAULT_COLOR][1], COLOR_SETS[DEFAULT_COLOR][2]
+        self.base_title = f"Quansheng K5 Combined Viewer/Remote v{VERSION}"
+
         self.display = DisplayCanvas(self)
-        self.display.set_canvas(self.canvas)
         self.long_press_checkbox = QCheckBox("Long press (SHIFT)")
-        self.rx_buffer = bytearray()
         self.long_press_checkbox.setToolTip("Send TYPE_KEY_LONG packets")
         self.tx_timer = QTimer(self)
         self.tx_timer.setInterval(120)
         self.tx_timer.timeout.connect(self.send_tx_hold_key)
 
         self.build_ui()
-
         self.setWindowTitle(f"{self.base_title} – No data")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll_serial)
         self.timer.start(10)
+
+        self.draw_frame()
 
     @property
     def display_width(self) -> int:
@@ -259,8 +261,6 @@ class CombinedQtViewer(QWidget):
         self.setLayout(layout)
 
     def send_tx_hold_key(self):
-        # Use long-press packets for TX hold so the firmware keeps PTT asserted
-        # between timer ticks instead of briefly releasing it.
         send_radio_key(self.ser, KEYCODES["PTT"], True)
 
     def start_tx_hold(self):
@@ -279,31 +279,28 @@ class CombinedQtViewer(QWidget):
         self.setFocus()
 
     def poll_serial(self):
-        got_frame = False
         latest_frame = None
-
         while True:
             frame = read_frame(self.ser, self.framebuffer, self.rx_buffer)
             if frame is None:
                 break
-            got_frame = True
             latest_frame = frame
 
         now = time.monotonic()
 
-        if got_frame and latest_frame is not None:
+        if latest_frame is not None:
             self.framebuffer = latest_frame
-            min_draw_interval = 1.0 / self.max_draw_fps
-            if now - self.last_draw_time >= min_draw_interval:
+            min_interval = 1.0 / self.max_draw_fps
+            if now - self.last_draw_time >= min_interval:
                 self.draw_frame()
                 self.last_draw_time = now
 
-            self.frame_count += 1
-            if now - self.last_time >= 1.0:
-                fps = self.frame_count / (now - self.last_time)
+            self.frame_counter += 1
+            if now - self.last_title_time >= 1.0:
+                fps = self.frame_counter / (now - self.last_title_time)
                 self.setWindowTitle(f"{self.base_title} – FPS: {fps:>04.1f}")
-                self.frame_count = 0
-                self.last_time = now
+                self.frame_counter = 0
+                self.last_title_time = now
                 self.frame_lost = 0
         else:
             self.frame_lost = min(self.frame_lost + 1, 5)
@@ -315,27 +312,26 @@ class CombinedQtViewer(QWidget):
             self.last_keepalive_time = now
 
     def draw_frame(self):
-        self.canvas = QPixmap(self.display_width, self.display_height)
-        self.canvas.fill(self.bg_color)
-
-        painter = QPainter(self.canvas)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self.fg_color)
+        img = QImage(WIDTH, HEIGHT, QImage.Format.Format_RGB32)
+        bg = self.bg_color.rgb()
+        fg = self.fg_color.rgb()
 
         bit_index = 0
         for y in range(HEIGHT):
             for x in range(WIDTH):
                 byte_idx = bit_index // 8
                 bit_pos = bit_index % 8
-                bit = (self.framebuffer[byte_idx] >> bit_pos) & 0x01 if byte_idx < len(self.framebuffer) else 0
-                if bit:
-                    px = x * (self.pixel_size - 1)
-                    py = y * self.pixel_size
-                    painter.drawRect(px, py, self.pixel_size - 1 - self.pixel_lcd, self.pixel_size - self.pixel_lcd)
+                bit = (self.framebuffer[byte_idx] >> bit_pos) & 1
+                img.setPixel(x, y, fg if bit else bg)
                 bit_index += 1
 
-        painter.end()
-        self.display.set_canvas(self.canvas)
+        scaled = img.scaled(
+            self.display_width,
+            self.display_height,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        self.display.set_canvas(QPixmap.fromImage(scaled))
 
     def keyPressEvent(self, event: QKeyEvent):
         if event.isAutoRepeat():
@@ -349,38 +345,28 @@ class CombinedQtViewer(QWidget):
 
         if key == Qt.Key.Key_Space:
             filename = datetime.datetime.now().strftime("screenshot_%Y%m%d_%H%M%S.png")
-            self.canvas.save(filename)
+            self.display.canvas.save(filename)
             print(f"[✔] Screenshot saved: {filename}")
             return
 
-        if key == Qt.Key.Key_P:
-            self.pixel_lcd = 1 - self.pixel_lcd
-            self.draw_frame()
-            return
-
         if key == Qt.Key.Key_I:
-            if self.bg_color == QColor(0, 0, 0):
-                self.bg_color, self.fg_color = self.fg_color, QColor(0, 0, 0)
-            else:
-                self.bg_color, self.fg_color = QColor(0, 0, 0), self.bg_color
+            self.bg_color, self.fg_color = self.fg_color, self.bg_color
             self.draw_frame()
             return
 
-        if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus):
-            if self.pixel_size < 12:
-                self.pixel_size += 1
-                self.draw_frame()
+        if key in (Qt.Key.Key_Equal, Qt.Key.Key_Plus) and self.pixel_size < 12:
+            self.pixel_size += 1
+            self.draw_frame()
             return
 
-        if key in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore):
-            if self.pixel_size > 3:
-                self.pixel_size -= 1
-                self.draw_frame()
+        if key in (Qt.Key.Key_Minus, Qt.Key.Key_Underscore) and self.pixel_size > 3:
+            self.pixel_size -= 1
+            self.draw_frame()
             return
 
         text = event.text().lower() if event.text() else ""
         if text in COLOR_SETS:
-            self.fg_color, self.bg_color = COLOR_SETS[text][1:]
+            self.fg_color, self.bg_color = COLOR_SETS[text][1], COLOR_SETS[text][2]
             self.draw_frame()
             return
 
