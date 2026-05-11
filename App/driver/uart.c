@@ -28,15 +28,8 @@
 // Packet types for serial key injection (K5Viewer → radio)
 #define UART_TYPE_KEY       0x03
 #define UART_TYPE_KEY_LONG  0x04
+#define UART_TYPE_KEY_BATCH 0x05
 
-typedef enum {
-    UART_PARSE_IDLE = 0,
-    UART_PARSE_KA_1,
-    UART_PARSE_KEY_1,
-    UART_PARSE_KEY_2,
-    UART_PARSE_KEY_3,
-    UART_PARSE_KEY_3L,
-} UART_ParseState_t;
 #endif
 
 #define USARTx USART1
@@ -165,60 +158,68 @@ void UART_LogSend(const void *pBuffer, uint32_t Size)
 #ifdef ENABLE_FEAT_F4HWN_SCREENSHOT
 bool UART_IsCableConnected(void)
 {
-    static uint32_t         read_ptr = 0;
-    static UART_ParseState_t state   = UART_PARSE_IDLE;
-
-    bool     connected = false;
+    static uint32_t read_ptr = 0;
+    bool connected = false;
     uint32_t write_ptr = sizeof(UART_DMA_Buffer) - LL_DMA_GetDataLength(DMA1, DMA_CHANNEL);
     uint32_t processed = 0;
 
     while (read_ptr != write_ptr && processed < sizeof(UART_DMA_Buffer))
     {
-        uint8_t b = UART_DMA_Buffer[read_ptr];
-
-        read_ptr++;
-        if (read_ptr >= sizeof(UART_DMA_Buffer))
-            read_ptr = 0;
+        uint8_t b0 = UART_DMA_Buffer[read_ptr++];
+        if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0;
         processed++;
 
-        switch (state)
+        if (b0 == 0x55)
         {
-            case UART_PARSE_IDLE:
-                if      (b == 0x55) state = UART_PARSE_KA_1;
-                else if (b == 0xAA) state = UART_PARSE_KEY_1;
-                break;
+            if (read_ptr == write_ptr) break;
+            uint8_t b1 = UART_DMA_Buffer[read_ptr++];
+            if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0;
+            processed++;
+            if (b1 == 0xAA) connected = true;
+            continue;
+        }
 
-            case UART_PARSE_KA_1:
-                if (b == 0xAA)
-                    connected = true;
-                state = UART_PARSE_IDLE;
-                break;
+        if (b0 != 0xAA || read_ptr == write_ptr) continue;
+        uint8_t b1 = UART_DMA_Buffer[read_ptr++]; if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0; processed++;
+        if (b1 != 0x55 || read_ptr == write_ptr) continue;
 
-            case UART_PARSE_KEY_1:
-                state = (b == 0x55) ? UART_PARSE_KEY_2 : UART_PARSE_IDLE;
-                break;
+        uint8_t type = UART_DMA_Buffer[read_ptr++]; if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0; processed++;
 
-            case UART_PARSE_KEY_2:
-                if      (b == UART_TYPE_KEY)      state = UART_PARSE_KEY_3;
-                else if (b == UART_TYPE_KEY_LONG) state = UART_PARSE_KEY_3L;
-                else                              state = UART_PARSE_IDLE;
-                break;
+        if (type == UART_TYPE_KEY || type == UART_TYPE_KEY_LONG)
+        {
+            if (read_ptr == write_ptr) break;
+            uint8_t key = UART_DMA_Buffer[read_ptr++]; if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0; processed++;
+            if (type == UART_TYPE_KEY) KEYBOARD_InjectKey(key); else KEYBOARD_InjectKeyLong(key);
+            connected = true;
+            continue;
+        }
 
-            case UART_PARSE_KEY_3:
-                KEYBOARD_InjectKey(b);
-                connected = true;
-                state = UART_PARSE_IDLE;
-                break;
+        if (read_ptr == write_ptr) break;
+        uint8_t sz_hi = UART_DMA_Buffer[read_ptr++]; if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0; processed++;
+        if (read_ptr == write_ptr) break;
+        uint8_t sz_lo = UART_DMA_Buffer[read_ptr++]; if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0; processed++;
+        uint16_t size = ((uint16_t)sz_hi << 8) | sz_lo;
 
-            case UART_PARSE_KEY_3L:
-                KEYBOARD_InjectKeyLong(b);
-                connected = true;
-                state = UART_PARSE_IDLE;
-                break;
-
-            default:
-                state = UART_PARSE_IDLE;
-                break;
+        if (type == UART_TYPE_KEY_BATCH && size <= 128 && (size % 2) == 0)
+        {
+            for (uint16_t i = 0; i < size; i += 2)
+            {
+                if (read_ptr == write_ptr) break;
+                uint8_t key = UART_DMA_Buffer[read_ptr++]; if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0; processed++;
+                if (read_ptr == write_ptr) break;
+                uint8_t flg = UART_DMA_Buffer[read_ptr++]; if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0; processed++;
+                if (flg & 0x01) KEYBOARD_InjectKeyLong(key); else KEYBOARD_InjectKey(key);
+            }
+            connected = true;
+        }
+        else
+        {
+            for (uint16_t i = 0; i < size && read_ptr != write_ptr; i++)
+            {
+                read_ptr++;
+                if (read_ptr >= sizeof(UART_DMA_Buffer)) read_ptr = 0;
+                processed++;
+            }
         }
     }
 
