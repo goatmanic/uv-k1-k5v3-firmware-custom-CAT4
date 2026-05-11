@@ -62,6 +62,15 @@ void KEYBOARD_InjectKeyLong(uint8_t keyCode);
 
 // Set/clear a serial-held key state for true press-and-hold semantics over wire.
 void KEYBOARD_SetSerialKeyState(uint8_t keyCode, bool isLong, bool isPressed);
+
+// True while a key is being held via serial key-state packets.
+bool KEYBOARD_IsSerialKeyHeld(KEY_Code_t key);
+#else
+static inline bool KEYBOARD_IsSerialKeyHeld(KEY_Code_t key)
+{
+    (void)key;
+    return false;
+}
 #endif
 
 KEY_Code_t KEYBOARD_Poll(void);

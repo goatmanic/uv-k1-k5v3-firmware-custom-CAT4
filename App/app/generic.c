@@ -100,7 +100,7 @@ void GENERIC_Key_PTT(bool bKeyPressed)
 {
     gInputBoxIndex = 0;
 
-    if (!bKeyPressed || SerialConfigInProgress())
+    if (!bKeyPressed || (SerialConfigInProgress() && !KEYBOARD_IsSerialKeyHeld(KEY_PTT)))
     {   // PTT released
         if (gCurrentFunction == FUNCTION_TRANSMIT) {    
             // we are transmitting .. stop
