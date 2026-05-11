@@ -113,6 +113,11 @@ void KEYBOARD_SetSerialKeyState(uint8_t keyCode, bool isLong, bool isPressed)
     }
 }
 
+bool KEYBOARD_IsSerialKeyHeld(KEY_Code_t key)
+{
+    return gSerialKeyForced && gKeyFromSerial == key;
+}
+
 #endif
 
 #define GPIOx               GPIOB
