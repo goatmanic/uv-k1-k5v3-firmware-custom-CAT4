@@ -215,10 +215,6 @@ class CombinedQtViewer(QWidget):
         self.key_repeat_timer.setInterval(45)
         self.key_repeat_timer.timeout.connect(self.send_held_key)
         self.pending_key_events: list[tuple[int, bool]] = []
-        self.key_flush_timer = QTimer(self)
-        self.key_flush_timer.setInterval(10)
-        self.key_flush_timer.timeout.connect(self.flush_pending_keys)
-
         self.build_ui()
 
         self.setWindowTitle(f"{self.base_title} – No data")
@@ -306,15 +302,16 @@ class CombinedQtViewer(QWidget):
 
     def send_tx_hold_key(self):
         self.queue_key(KEYCODES["PTT"], True)
+        self.flush_pending_keys()
 
     def send_held_key(self):
         if self.held_keycode is None:
             return
         self.queue_key(self.held_keycode, self.held_key_long)
+        self.flush_pending_keys()
 
     def start_tx_hold(self):
         self.send_tx_hold_key()
-        self.key_flush_timer.start()
         self.tx_timer.start()
 
     def stop_tx_hold(self):
