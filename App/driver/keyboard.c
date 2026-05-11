@@ -39,6 +39,7 @@ bool       gWasFKeyPressed  = false;
 volatile KEY_Code_t gKeyFromSerial      = KEY_INVALID;
 static   uint8_t    gSerialKeyHoldCount = 0;
 static   uint8_t    gSerialKeyLong      = 0;  // 0 = short press, 1 = long press
+static   uint8_t    gSerialKeyForced    = 0;  // 1 while a key-down state is active over serial
 
 typedef struct {
     KEY_Code_t key;
@@ -93,6 +94,25 @@ void KEYBOARD_InjectKeyLong(uint8_t keyCode)
         KEYBOARD_EnqueueSerialKey((KEY_Code_t)keyCode, 1);
     }
 }
+
+void KEYBOARD_SetSerialKeyState(uint8_t keyCode, bool isLong, bool isPressed)
+{
+    if (keyCode >= KEY_INVALID)
+        return;
+
+    if (isPressed) {
+        gKeyFromSerial      = (KEY_Code_t)keyCode;
+        gSerialKeyLong      = isLong ? 1u : 0u;
+        gSerialKeyHoldCount = 0;
+        gSerialKeyForced    = 1;
+    } else if (gSerialKeyForced && gKeyFromSerial == (KEY_Code_t)keyCode) {
+        gKeyFromSerial      = KEY_INVALID;
+        gSerialKeyLong      = 0;
+        gSerialKeyHoldCount = 0;
+        gSerialKeyForced    = 0;
+    }
+}
+
 #endif
 
 #define GPIOx               GPIOB
@@ -153,7 +173,7 @@ KEY_Code_t KEYBOARD_Poll(void)
     //   - Long:  key_repeat_delay_10ms (40) → ProcessKey(key, true, true)
     // Once the hold count is exhausted we clear it — next call returns KEY_INVALID,
     // which triggers the release path in app.c naturally.
-    if (gKeyFromSerial == KEY_INVALID) {
+    if (!gSerialKeyForced && gKeyFromSerial == KEY_INVALID) {
         KEY_Code_t nextKey;
         uint8_t    nextIsLong;
         if (KEYBOARD_DequeueSerialKey(&nextKey, &nextIsLong)) {
@@ -172,7 +192,7 @@ KEY_Code_t KEYBOARD_Poll(void)
         // to keep PTT asserted instead of waiting ~400ms for long-press timing.
         if (gSerialKeyLong && injected == KEY_PTT)
             threshold = SERIAL_KEY_SHORT_POLLS;
-        if (++gSerialKeyHoldCount >= threshold) {
+        if (!gSerialKeyForced && ++gSerialKeyHoldCount >= threshold) {
             gKeyFromSerial      = KEY_INVALID;
             gSerialKeyHoldCount = 0;
             gSerialKeyLong      = 0;
