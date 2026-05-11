@@ -269,12 +269,30 @@ class CombinedQtViewer(QWidget):
             for c, key_name in enumerate(row):
                 button = QPushButton(key_name)
                 button.setMinimumSize(64, 36)
-                button.pressed.connect(lambda name=key_name: self.send_named_key(name))
+                button.pressed.connect(lambda _checked=False, name=key_name: self.start_button_hold(name))
+                button.released.connect(self.stop_button_hold)
                 grid.addWidget(button, r, c)
 
         layout.addLayout(grid)
         layout.addStretch(1)
         self.setLayout(layout)
+
+
+    def start_button_hold(self, key_name: str):
+        if key_name not in KEYCODES:
+            return
+        is_long = self.long_press_checkbox.isChecked()
+        keycode = KEYCODES[key_name]
+        self.queue_key(keycode, is_long)
+        self.flush_pending_keys()
+        self.held_keycode = keycode
+        self.held_key_long = is_long
+        self.key_repeat_timer.start()
+
+    def stop_button_hold(self):
+        self.key_repeat_timer.stop()
+        self.held_keycode = None
+        self.held_key_long = False
 
     def queue_key(self, keycode: int, is_long: bool):
         self.pending_key_events.append((keycode, is_long))
