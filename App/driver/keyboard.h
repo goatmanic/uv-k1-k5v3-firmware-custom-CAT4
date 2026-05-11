@@ -59,6 +59,9 @@ void KEYBOARD_InjectKey(uint8_t keyCode);
 
 // Inject a long press received from serial (UART or VCP).
 void KEYBOARD_InjectKeyLong(uint8_t keyCode);
+
+// Set/clear a serial-held key state for true press-and-hold semantics over wire.
+void KEYBOARD_SetSerialKeyState(uint8_t keyCode, bool isLong, bool isPressed);
 #endif
 
 KEY_Code_t KEYBOARD_Poll(void);

@@ -24,6 +24,7 @@
 #define VCP_TYPE_KEY       0x03
 #define VCP_TYPE_KEY_LONG  0x04
 #define VCP_TYPE_KEY_BATCH 0x05
+#define VCP_TYPE_KEY_STATE 0x06
 #endif
 
 uint8_t VCP_RxBuf[VCP_RX_BUF_SIZE];
@@ -108,6 +109,10 @@ bool VCP_ScreenshotPing(void)
                     parser.size = 1;
                     parser.payloadRead = 0;
                     parser.state = PARSER_WAIT_PAYLOAD;
+                } else if (b == VCP_TYPE_KEY_STATE) {
+                    parser.size = 2;
+                    parser.payloadRead = 0;
+                    parser.state = PARSER_WAIT_PAYLOAD;
                 } else {
                     parser.state = PARSER_WAIT_SIZE_HI;
                 }
@@ -139,6 +144,18 @@ bool VCP_ScreenshotPing(void)
                     if (b < KEY_INVALID) {
                         if (parser.type == VCP_TYPE_KEY) KEYBOARD_InjectKey(b); else KEYBOARD_InjectKeyLong(b);
                         connected = true;
+                    }
+                }
+                else if (parser.type == VCP_TYPE_KEY_STATE)
+                {
+                    if (parser.payloadRead == 0u) {
+                            parser.payloadIndex = b;
+                    } else {
+                            parser.payloadLong = b;
+                            if (parser.payloadIndex < KEY_INVALID) {
+                                KEYBOARD_SetSerialKeyState(parser.payloadIndex, (parser.payloadLong & 0x01u) != 0u, (parser.payloadLong & 0x02u) != 0u);
+                                connected = true;
+                            }
                     }
                 }
                 else if (parser.type == VCP_TYPE_KEY_BATCH)
