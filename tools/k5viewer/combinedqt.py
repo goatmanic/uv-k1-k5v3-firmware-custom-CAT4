@@ -32,6 +32,7 @@ TYPE_SCREENSHOT = b"\x01"
 TYPE_DIFF = b"\x02"
 TYPE_KEY = b"\x03"
 TYPE_KEY_LONG = b"\x04"
+TYPE_KEY_BATCH = b"\x05"
 
 KEYCODES = {
     "0": 0,
@@ -93,10 +94,16 @@ def send_keepalive(ser: serial.Serial):
         pass
 
 
-def send_radio_key(ser: serial.Serial, keycode: int, is_long: bool):
-    pkt_type = TYPE_KEY_LONG if is_long else TYPE_KEY
+def send_radio_key_batch(ser: serial.Serial, events: list[tuple[int, bool]]):
+    if not events:
+        return
+    payload = bytearray()
+    for keycode, is_long in events[:64]:
+        payload.append(keycode & 0xFF)
+        payload.append(1 if is_long else 0)
+    size = len(payload).to_bytes(2, "big")
     try:
-        ser.write(HEADER + pkt_type + bytes([keycode]))
+        ser.write(HEADER + TYPE_KEY_BATCH + size + bytes(payload))
     except serial.SerialException:
         print("[!] Failed to send key packet to radio")
 
@@ -207,6 +214,10 @@ class CombinedQtViewer(QWidget):
         self.key_repeat_timer = QTimer(self)
         self.key_repeat_timer.setInterval(45)
         self.key_repeat_timer.timeout.connect(self.send_held_key)
+        self.pending_key_events: list[tuple[int, bool]] = []
+        self.key_flush_timer = QTimer(self)
+        self.key_flush_timer.setInterval(10)
+        self.key_flush_timer.timeout.connect(self.flush_pending_keys)
 
         self.build_ui()
 
@@ -265,29 +276,40 @@ class CombinedQtViewer(QWidget):
         layout.addStretch(1)
         self.setLayout(layout)
 
+    def queue_key(self, keycode: int, is_long: bool):
+        self.pending_key_events.append((keycode, is_long))
+
+    def flush_pending_keys(self):
+        if not self.pending_key_events:
+            return
+        batch = self.pending_key_events
+        self.pending_key_events = []
+        send_radio_key_batch(self.ser, batch)
+
     def send_tx_hold_key(self):
-        # Use long-press packets for TX hold so the firmware keeps PTT asserted
-        # between timer ticks instead of briefly releasing it.
-        send_radio_key(self.ser, KEYCODES["PTT"], True)
+        self.queue_key(KEYCODES["PTT"], True)
 
     def send_held_key(self):
         if self.held_keycode is None:
             return
-        send_radio_key(self.ser, self.held_keycode, self.held_key_long)
+        self.queue_key(self.held_keycode, self.held_key_long)
 
     def start_tx_hold(self):
         self.send_tx_hold_key()
+        self.key_flush_timer.start()
         self.tx_timer.start()
 
     def stop_tx_hold(self):
         self.tx_timer.stop()
+        self.flush_pending_keys()
 
     def send_named_key(self, key_name: str, is_long: bool | None = None):
         if key_name not in KEYCODES:
             return
         if is_long is None:
             is_long = self.long_press_checkbox.isChecked()
-        send_radio_key(self.ser, KEYCODES[key_name], is_long)
+        self.queue_key(KEYCODES[key_name], is_long)
+        self.flush_pending_keys()
         self.setFocus()
 
     def poll_serial(self):
@@ -396,7 +418,8 @@ class CombinedQtViewer(QWidget):
         if key in KEY_BINDINGS:
             is_long = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
             keycode = KEY_BINDINGS[key]
-            send_radio_key(self.ser, keycode, is_long)
+            self.queue_key(keycode, is_long)
+            self.flush_pending_keys()
             if not event.isAutoRepeat():
                 self.held_keycode = keycode
                 self.held_key_long = is_long
@@ -415,6 +438,7 @@ class CombinedQtViewer(QWidget):
     def closeEvent(self, event):
         self.timer.stop()
         self.tx_timer.stop()
+        self.flush_pending_keys()
         self.key_repeat_timer.stop()
         self.ser.close()
         event.accept()
